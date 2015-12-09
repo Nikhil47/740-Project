@@ -41,6 +41,8 @@ if(!file.exists("~/740 Project/polyFits.Rda")){
     poly.fits <- calculatePolyFits(c9, degree)
     poly.fits.cacheFunctions$setCache(poly.fits)
 }
+print("PolyFits Loaded")
+
 # Calculated tonnes of Beta values from the data
 poly.fits <- poly.fits.cacheFunctions$getCache()
 # Computing the covariance matrix for the poly.fits
@@ -60,53 +62,72 @@ values1 <- list()
 values2 <- list()
 expectation.probabilities <- matrix(nrow = length(person_id), ncol = 12)
 
-# Expectation Step    
-for(i in 1:length(unique(c9$Person_ID))){
-     Xs <- c9[Person_ID == person_id[i], result_date_months]
-     phiMat <- data.table(X1 = Xs)
-     phiMat <- phiMat[, `:=`(X2 = X1^2, X3 = X1^3, X4 = X1^4)]
-     expectation.mean <- as.matrix(phiMat) %*% t(betas)
-     s <- ((0.1)^2) * diag(length(Xs))
-     
-     normal.prob <- numeric(length = 12)
-     for(j in 1:12){
-        normal.prob[j] <- pmvnorm(lower = -Inf, upper = Xs, mean = expectation.mean[, j], sigma = s)[1]
-     }
-     expectation.probabilities[i, ] <- normal.prob * multinomial.probs
-     normalizing.constant <- sum(expectation.probabilities[i, ])
-     expectation.probabilities[i, ] <- expectation.probabilities[i, ] / normalizing.constant
-     
-     # Values for the Maximization step
-     values1[[i]] <- expectation.probabilities[i, ] %*% t(as.matrix(phiMat)) %*% solve(s) %*% phiMat
-     values2[[i]] <- expectation.probabilities[i, ] %*% t(as.matrix(phiMat)) %*% solve(s) %*% as.matrix(Xs)
-}
-
-alpha <- 2
-new.pis <- vector(mode = "numeric", length = 12L)
-new.betas <- matrix(nrow = 12, ncol = degree)
-sum.value1 <- matrix(data = 0, nrow = degree, ncol = degree)
-sum.value2 <- matrix(data = 0, nnrow = degree, ncol = 1)
-
-#Maximization Step
-add <- function(x) Reduce("+", x)
-sum.value1 <- add(values1)
-sum.value2 <- add(values2)
+for(loop in 1:2){
+    # Expectation Step    
+    for(i in 1:length(unique(c9$Person_ID))){
+         Xs <- c9[Person_ID == person_id[i], result_date_months]
+         phiMat <- data.table(X1 = Xs)
+         phiMat <- phiMat[, `:=`(X2 = X1^2, X3 = X1^3, X4 = X1^4)]
+         expectation.mean <- as.matrix(phiMat) %*% t(betas)
+         s <- ((0.1)) * diag(length(Xs))
+         
+         normal.prob <- numeric(length = 12)
+         for(j in 1:12){
+            normal.prob[j] <- pmvnorm(lower = -Inf, upper = Inf, mean = expectation.mean[, j], sigma = s)[1]
+         }
+         expectation.probabilities[i, ] <- normal.prob * multinomial.probs
+         normalizing.constant <- sum(expectation.probabilities[i, ])
+         expectation.probabilities[i, ] <- expectation.probabilities[i, ] / normalizing.constant
+         
+         # Values for the Maximization step
+         values1[[i]] <- t(as.matrix(phiMat)) %*% solve(s) %*% as.matrix(phiMat)
+         values2[[i]] <- t(as.matrix(phiMat)) %*% solve(s) %*% as.matrix(Xs)
+    }
+    print("Expectation Step Completed")
     
-for(i in 1:12){
-    new.pis[i] <- sum(expectation.probabilities[, i]) + alpha - 1
+    alpha <- 2
+    new.pis <- vector(mode = "numeric", length = 12L)
+    new.betas <- matrix(nrow = 12, ncol = degree)
+    sum.value1 <- matrix(data = 0, nrow = degree, ncol = degree)
+    sum.value2 <- matrix(data = 0, nrow = degree, ncol = 1)
+    
+    #Maximization Step
+    add <- function(x) Reduce("+", x)
+    
+    betas.covariance.inverse <- solve(betas.covariance.matrix)
+    # For summing the values in Bracket 1
+    Bracket1 <- list()
+    Bracket1[[1]] <- betas.covariance.inverse
+    
+    # For summing the values in Bracket 2
+    Bracket2 <- list()
+    Bracket2[[1]] <- betas.covariance.inverse %*% betas.mean
+    
+    for(j in 1:12){
+        temp.list1 <- list()
+        temp.list2 <- list()
+        for(i in 1:length(unique(c9$Person_ID))){
+            temp.list1[[i]] <- expectation.probabilities[i, j] * values1[[i]]
+            temp.list2[[i]] <- expectation.probabilities[i, j] * values2[[i]]
+        }
+        
+        Bracket1[[2]] <- add(temp.list1)
+        Bracket2[[2]] <- add(temp.list2)
+        new.betas[j, ] <- solve(add(Bracket1)) %*% (add(Bracket2))
+    }
+    
+    # Calculating Pis
+    for(i in 1:12){
+        new.pis[i] <- sum(expectation.probabilities[, i]) + alpha - 1
+    }
+    normalizing.constant <- sum(new.pis)
+    new.pis <- new.pis / normalizing.constant
+    
+    print("Old Betas")
+    print(betas)
+    print("New Betas")
+    print(new.betas)
+    
+    betas <- new.betas
+    multinomial.probs <- new.pis
 }
-normalizing.constant <- sum(new.pis)
-new.pis <- new.pis / normalizing.constant
-
-betas.covariance.inverse <- solve(betas.covariance.matrix)
-# For summing the values in Bracket 1
-values1 <- list()
-values1[[1]] <- betas.covariance.inverse
-values1[[2]] <- sum.value1
-
-# For summing the values in Bracket 2
-values2 <- list()
-values2[[1]] <- betas.covariance.inverse %*% betas.mean
-values2[[2]] <- sum.value2
-
-new.betas <- solve(add(values1)) %*% (add(values2))
