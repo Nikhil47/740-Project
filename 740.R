@@ -54,7 +54,6 @@ betas <- mvrnorm(n = 12, betas.mean, betas.covariance.matrix)
 
 multinomial.pi <- as.vector(rdirichlet(n = 1, alpha = rep(2, 12)))
 
-# Outer Loop from here
 multinomial.probs <- as.vector(rmultinom(n = 1, size = length(unique(c9$Person_ID)), prob = multinomial.pi))
 
 person_id <- unique(c9$Person_ID)
@@ -70,11 +69,12 @@ for(loop in 1:2){
          phiMat <- phiMat[, `:=`(X2 = X1^2, X3 = X1^3, X4 = X1^4)]
          expectation.mean <- as.matrix(phiMat) %*% t(betas)
          s <- ((0.1)) * diag(length(Xs))
+         normal.prob <- rep(1, times = 12)
+#         normal.prob <- numeric(length = 12)
+#          for(j in 1:12){
+#             normal.prob[j] <- pmvnorm(lower = -Inf, upper = Inf, mean = expectation.mean[, j], sigma = s)[1]
+#          }
          
-         normal.prob <- numeric(length = 12)
-         for(j in 1:12){
-            normal.prob[j] <- pmvnorm(lower = -Inf, upper = Inf, mean = expectation.mean[, j], sigma = s)[1]
-         }
          expectation.probabilities[i, ] <- normal.prob * multinomial.probs
          normalizing.constant <- sum(expectation.probabilities[i, ])
          expectation.probabilities[i, ] <- expectation.probabilities[i, ] / normalizing.constant
@@ -88,8 +88,8 @@ for(loop in 1:2){
     alpha <- 2
     new.pis <- vector(mode = "numeric", length = 12L)
     new.betas <- matrix(nrow = 12, ncol = degree)
-    sum.value1 <- matrix(data = 0, nrow = degree, ncol = degree)
-    sum.value2 <- matrix(data = 0, nrow = degree, ncol = 1)
+#     sum.value1 <- matrix(data = 0, nrow = degree, ncol = degree)
+#     sum.value2 <- matrix(data = 0, nrow = degree, ncol = 1)
     
     #Maximization Step
     add <- function(x) Reduce("+", x)
@@ -128,6 +128,9 @@ for(loop in 1:2){
     print("New Betas")
     print(new.betas)
     
+    # New values for the next iteration
     betas <- new.betas
+    betas.mean <- apply(betas, 2, mean)
+    betas.covariance.inverse <- cov(betas)
     multinomial.probs <- new.pis
 }
