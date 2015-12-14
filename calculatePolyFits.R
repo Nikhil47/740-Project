@@ -1,5 +1,5 @@
 calculatePolyFits <- function(c9, degree = 3, g){
-    poly.fits = matrix(nrow = 12000, ncol = degree)
+    poly.fits = matrix(nrow = 12000, ncol = degree+1)
     for(i in 1:1000){
         # Divide unique ids in 12 parts
         ids <- sample(x = unique(c9$Person_ID), replace = F)

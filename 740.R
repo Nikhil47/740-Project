@@ -46,7 +46,7 @@ if(!file.exists("~/740 Project/polyFits.Rda")){
 print("PolyFits Loaded")
 
 g <- 12
-alpha <- 2
+alpha <- 5
 
 # Calculated tonnes of Beta values from the data
 poly.fits <- poly.fits.cacheFunctions$getCache()
@@ -57,7 +57,7 @@ betas.mean <- apply(poly.fits, 2, mean)
 # Using a Multivariate normal distribution to get the intial values of the betas
 betas <- mvrnorm(n = g, betas.mean, betas.covariance.matrix)
 
-multinomial.pi <- as.vector(rdirichlet(n = 1, alpha = rep(2, g)))
+multinomial.pi <- as.vector(rdirichlet(n = 1, alpha = rep(alpha, g)))
 
 multinomial.probs <- as.vector(rmultinom(n = 1, size = length(unique(c9$Person_ID)), prob = multinomial.pi))
 
@@ -69,16 +69,21 @@ expectation.probabilities <- matrix(nrow = length(person_id), ncol = g)
 for(loop in 1:3){
     # Expectation Step    
     for(i in 1:length(unique(c9$Person_ID))){
-         Xs <- c9[Person_ID == person_id[i], result_date_months]
-         phiMat <- data.table(X1 = Xs)
-         phiMat <- phiMat[, `:=`(X2 = Xs^2, X3 = Xs^3, X4 = Xs^4)]
+         Xs <- c9[Person_ID == person_id[i], eGFR]
+#          phiMat <- data.table(X1 = Xs)
+#          phiMat <- phiMat[, `:=`(X2 = Xs^2, X3 = Xs^3, X4 = Xs^4)]
+         phiMat <- data.table(X0 = rep(1, length(Xs)))
+         phiMat <- phiMat[, `:=`(X1 = Xs, X2 = Xs^2, X3 = Xs^3, X4 = Xs^4)]
          expectation.mean <- as.matrix(phiMat) %*% t(betas)
          s <- 37 * diag(length(Xs))
-        normal.prob <- rep(1, times = g)
-#          normal.prob <- numeric(length = g)
-#          for(j in 1:g){
-#             normal.prob[j] <- dmvnorm(x = Xs, mean = expectation.mean[, j], sigma = s)
-#          }
+#        normal.prob <- rep(1, times = g)
+         normal.prob <- numeric(length = g)
+         for(j in 1:g){
+            normal.prob[j] <- dmvnorm(x = Xs, mean = as.vector(expectation.mean[, j]), sigma = s, log = T)
+         }
+         
+         normalizing.constant <- sum(normal.prob)
+         normal.prob <- normal.prob / normalizing.constant
          
          expectation.probabilities[i, ] <- normal.prob * multinomial.probs
          normalizing.constant <- sum(expectation.probabilities[i, ])
@@ -145,9 +150,9 @@ for(loop in 1:3){
         c9[person_id == i, group := which(maximum == expectation.probabilities[j, ])]
         j <- j + 1
     }
-    
-    xvalues <- data.frame(x = seq(from = 1, to = 130))
-    betas.plot <- ggplot(data = xvalues, aes(x))
+    # 60 : months for 5 years
+    xvalues <- data.frame(x = seq(from = 1, to = 60))
+    betas.plot <- ggplot()
     plines <- function(x, row){ 
         eq <- 0
         for(i in 0:degree)
@@ -158,14 +163,15 @@ for(loop in 1:3){
     for(i in 1:g){
         r <- r + 1
         betas.plot <- betas.plot + 
-            stat_function(fun = plines, args = list(row = r), aes(colour = paste("line", r, sep = " ")))
+            stat_function(fun = plines, args = list(row = r), data = xvalues, 
+                          aes(color = paste("line", r, sep = " ")))
     }
     betas.plot <- betas.plot + scale_color_brewer("Groups", type = "seq", palette = 1)
     print(betas.plot)
     # the print statement can be modified to save the plot to disk
 }
 
-dest <- paste0("~/", Sys.time())
+dest <- paste0("~/", gsub(pattern = "(\\s|:)", replacement = "-", x = Sys.time()))
 dir.create(path = dest)
 print("Folder Created")
 for(i in 1:g){

@@ -4,8 +4,8 @@ givePBetas <- function(c9, parts, poly.fits, iteration, degree){
         fitting.data <- c9[Person_ID == parts[[i]]]
         fit <- lm(data = fitting.data, 
                   formula = fitting.data$eGFR ~ poly(fitting.data$result_date_months, 
-                                                     degree = degree, raw = T) - 1)
-        poly.fits[12*(iteration - 1) + i, ] <- summary(fit)$coef[1:degree]
+                                                     degree = degree, raw = T))
+        poly.fits[12*(iteration - 1) + i, ] <- as.vector(summary(fit)$coef[, 1])
     }
     poly.fits
 }
