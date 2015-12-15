@@ -175,7 +175,6 @@ while(convergenceCondition > 0.001 && iterations < 20){
     # 60 : months for 5 years
     gcolors <- c("red", "blue", "black", "green", "purple", "cyan", "yellow", "brown", "orange",
                  "orchid", "navy")
-    xvalues <- data.frame(x = seq(from = 0, to = 3))
     
     plines <- function(x, row){ 
         eq <- 0
@@ -184,17 +183,16 @@ while(convergenceCondition > 0.001 && iterations < 20){
         return(eq)
     }
     
+    xvalues <- data.table(x = seq(from = 0, to = 3, by = 0.1))
+    
     for(i in 1:g){
-        ggplot(data = xvalues, aes(x = x)) + 
-            stat_function(fun = plines, args = list(row = i)) + #paste("line", i, sep = " ")
-            xlim(0, 3) + ylim(0, 200) + ggtitle(paste("Group", i, "Beta", sep = " "))
-        filename <- paste("Group", i, "Beta", iterations, sep = "-")
-        filename <- paste(filename, ".png")
-        ggsave(filename = filename)
+        expr <- parse(text = paste("Group", i, " := sapply(xvalues$x, plines, i)", sep = ""))
+        xvalues[, eval(expr)]
     }
-    # betas.plot <- betas.plot + 
-                    #scale_color_manual("Groups", values = gcolors)
-    #print(betas.plot)
+    xvalues <- melt(xvalues, measure.vars = names(xvalues)[2:length(names(xvalues))], variable.name = "Groups")
+    ggplot(data = xvalues, aes(x = x, y = value, colour = variable)) + geom_line() + 
+        ylab("eGFRs") + xlab("years") + ggtitle("Beta plot")
+    ggsave("Beta Curve.png")
     # the print statement can be modified to save the plot to disk
 }
 
@@ -208,7 +206,8 @@ for(i in 1:g){
             
             group.plot <- ggplot(data = groupset[Person_ID == j, .(eGFR, result_date_months)]) + 
             geom_point(aes(x = result_date_months, y = eGFR)) +
-            stat_function(fun = plines, args = list(row = i), aes(x = result_date_months))
+            stat_function(fun = plines, args = list(row = i), aes(x = result_date_months, colour = "red")) +
+                ggtitle(paste("Group ", i, " Person Id - ", j, sep = "")) + xlab("Years")
     }
     group.plot <- group.plot + xlim(0, 3) + ylim(0, 200)
     filename <- paste("Group", i, sep = " ")
