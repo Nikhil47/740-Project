@@ -4,13 +4,17 @@ library(gtools)
 library(mvtnorm)
 library(reshape2)
 
+dest <- paste0("~/", gsub(pattern = "(\\s|:)", replacement = "-", x = Sys.time()))
+dir.create(path = dest)
+setwd(dest)
+
 c9 <- as.data.table(read.table(file = "creatinine.csv", sep = ",", header = T))
 # Coercing the dates to the correct format
 c9[, result_date := as.Date(result_date, origin = "1900-01-01")]
 c9[, group := -1]
 
 # Choosing patients having more than 5 test results
-serious.patients <- c9[, .N >= 5, by = Person_ID][V1 == T, Person_ID]
+serious.patients <- c9[, .N >= 10, by = Person_ID][V1 == T, Person_ID]
 # Removing un-serious patients from the table
 c9 <- c9[Person_ID %in% serious.patients]
 
@@ -56,30 +60,36 @@ poly.fits <- poly.fits.cacheFunctions$getCache()
 betas.covariance.matrix <- diag(x = 10^2, nrow = degree + 1, ncol = degree + 1)
 # Calculating the means of the Betas
 # betas.mean <- apply(poly.fits, 2, mean)
-beats.mean <- rep(0, degree+1)
+betas.mean <- rep(0, degree+1)
 # Using a Multivariate normal distribution to get the intial values of the betas
 betas <- mvrnorm(n = g, betas.mean, betas.covariance.matrix)
 
 multinomial.pi <- as.vector(rdirichlet(n = 1, alpha = rep(alpha, g)))
-
-multinomial.probs <- as.vector(rmultinom(n = 1, size = length(unique(c9$Person_ID)), prob = multinomial.pi))
 
 person_id <- unique(c9$Person_ID)
 values1 <- list()
 values2 <- list()
 expectation.probabilities <- matrix(nrow = length(person_id), ncol = g)
 
-while(convergenceCondition > 0.001){
-    # Expectation Step    
+convergenceCondition <- 1
+iterations <- 0
+logsumexp <- function(x)
+{
+    m <- max(x)
+    m + log(sum(exp(x - m)))
+}
+
+while(convergenceCondition > 0.001 && iterations < 20){
+    # Expectation Step
+    multinomial.probs <- as.vector(rmultinom(n = 1, size = length(unique(c9$Person_ID)), prob = multinomial.pi))
+    
     for(i in 1:length(unique(c9$Person_ID))){
          Xs <- c9[Person_ID == person_id[i], result_date_months]
-#          phiMat <- data.table(X1 = Xs)
-#          phiMat <- phiMat[, `:=`(X2 = Xs^2, X3 = Xs^3, X4 = Xs^4)]
          phiMat <- data.table(X0 = rep(1, length(Xs)))
          phiMat <- phiMat[, `:=`(X1 = Xs, X2 = Xs^2, X3 = Xs^3, X4 = Xs^4)]
          expectation.mean <- as.matrix(phiMat) %*% t(betas)
          s <- 1 * diag(length(Xs))
-#        normal.prob <- rep(1, times = g)
+
          normal.prob <- numeric(length = g)
          egfrs <- c9[Person_ID == person_id[i], eGFR]
          for(j in 1:g){
@@ -87,10 +97,9 @@ while(convergenceCondition > 0.001){
                                       mean = as.vector(expectation.mean[, j]), sigma = s, log = T)
          }
          
-         normalizing.constant <- sum(normal.prob)
-         normal.prob <- normal.prob / normalizing.constant
-         
-         expectation.probabilities[i, ] <- normal.prob * multinomial.probs
+         expectation.probabilities[i, ] <- normal.prob + log(multinomial.probs) -
+                                        logsumexp(normal.prob + log(multinomial.probs))
+         expectation.probabilities[i, ] <- exp(expectation.probabilities[i, ])
          normalizing.constant <- sum(expectation.probabilities[i, ])
          expectation.probabilities[i, ] <- expectation.probabilities[i, ] / normalizing.constant
          
@@ -127,7 +136,7 @@ while(convergenceCondition > 0.001){
         
         Bracket1[[2]] <- add(temp.list1)
         Bracket2[[2]] <- add(temp.list2)
-        diagMat <- 0.1 * diag(nrow = degree + 1, ncol = degree + 1)
+        #diagMat <- 0.1 * diag(nrow = degree + 1, ncol = degree + 1)
         #new.betas[j, ] <- solve(add(Bracket1) + diagMat) %*% (add(Bracket2))
         new.betas[j, ] <- solve(add(Bracket1)) %*% (add(Bracket2))
     }
@@ -145,53 +154,65 @@ while(convergenceCondition > 0.001){
     print(new.betas)
     
     # New values for the next iteration
+    convergenceCondition <- sum(abs((new.betas - betas)/betas))
     betas <- new.betas
-    betas.mean <- apply(betas, 2, mean)
-    betas.covariance.matrix <- cov(betas)
-    convergenceCondition <- sum(abs(new.betas - betas)/betas)
-    multinomial.probs <- new.pis
+    #betas.mean <- apply(betas, 2, mean)
+    #betas.covariance.matrix <- cov(betas)
+    multinomial.pi <- new.pis
+    iterations <- iterations + 1
     
     # Generate Plot for Beta values
     j <- 1
     for(i in unique(c9$Person_ID)){
-        maximum <- max(expectation.probabilities[j, ])
-        c9[person_id == i, group := which(maximum == expectation.probabilities[j, ])]
+        if(max(expectation.probabilities[j, ]) >= 0.80){
+            maximum <- max(expectation.probabilities[j, ])
+            c9[Person_ID == i, group := which(maximum == expectation.probabilities[j, ])]
+        }
+        else
+            c9[Person_ID == i, group := 99]
         j <- j + 1
     }
     # 60 : months for 5 years
     gcolors <- c("red", "blue", "black", "green", "purple", "cyan", "yellow", "brown", "orange",
                  "orchid", "navy")
-    xvalues <- data.frame(x = seq(from = 1, to = 7))
-    betas.plot <- ggplot(data = xvalues, aes(x = x))
+    xvalues <- data.frame(x = seq(from = 0, to = 3))
+    
     plines <- function(x, row){ 
         eq <- 0
-        for(i in 1:degree+1)
-            eq <- eq + betas[row, i] * (x^i)
+        for(i in 1:(degree+1))
+            eq <- eq + betas[row, i] * (x^(i-1))
         return(eq)
     }
     
     for(i in 1:g){
-        betas.plot <- betas.plot + 
-            stat_function(fun = plines, args = list(row = i),
-                          aes(colour = paste("line", i, sep = " ")))
+        ggplot(data = xvalues, aes(x = x)) + 
+            stat_function(fun = plines, args = list(row = i)) + #paste("line", i, sep = " ")
+            xlim(0, 3) + ylim(0, 200) + ggtitle(paste("Group", i, "Beta", sep = " "))
+        filename <- paste("Group", i, "Beta", iterations, sep = "-")
+        filename <- paste(filename, ".png")
+        ggsave(filename = filename)
     }
-    betas.plot <- betas.plot + 
-                    scale_color_manual("Groups", values = gcolors)
-    print(betas.plot)
+    # betas.plot <- betas.plot + 
+                    #scale_color_manual("Groups", values = gcolors)
+    #print(betas.plot)
     # the print statement can be modified to save the plot to disk
 }
 
-dest <- paste0("~/", gsub(pattern = "(\\s|:)", replacement = "-", x = Sys.time()))
-dir.create(path = dest)
+
 print("Folder Created")
 for(i in 1:g){
     
     groupset <- c9[, .SD[group == i], by = group]
-    group.plot <- ggplot()
     
-    for(j in head(unique(groupset$Person_ID))){
-        group.plot <- group.plot + 
-            stat_function(fun = plines, data = as.data.frame(groupset[j, eGFR]), args = list(row = i))
+    for(j in head(unique(groupset$Person_ID), n = 1)){
+            
+            group.plot <- ggplot(data = groupset[Person_ID == j, .(eGFR, result_date_months)]) + 
+            geom_point(aes(x = result_date_months, y = eGFR)) +
+            stat_function(fun = plines, args = list(row = i), aes(x = result_date_months))
     }
-    ggsave(filename = paste("Group", i, sep = " "), path = dest)
+    group.plot <- group.plot + xlim(0, 3) + ylim(0, 200)
+    filename <- paste("Group", i, sep = " ")
+    filename <- paste(filename, ".png")
+    print(group.plot)
+    #ggsave(filename = filename, plot = group.plot)
 }
