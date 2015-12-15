@@ -164,13 +164,8 @@ while(convergenceCondition > 0.001 && iterations < 20){
     # Generate Plot for Beta values
     j <- 1
     for(i in unique(c9$Person_ID)){
-        if(max(expectation.probabilities[j, ]) >= 0.80){
             maximum <- max(expectation.probabilities[j, ])
             c9[Person_ID == i, group := which(maximum == expectation.probabilities[j, ])]
-        }
-        else
-            c9[Person_ID == i, group := 99]
-        j <- j + 1
     }
     # 60 : months for 5 years
     gcolors <- c("red", "blue", "black", "green", "purple", "cyan", "yellow", "brown", "orange",
@@ -196,22 +191,33 @@ while(convergenceCondition > 0.001 && iterations < 20){
     # the print statement can be modified to save the plot to disk
 }
 
-
 print("Folder Created")
 for(i in 1:g){
     
     groupset <- c9[, .SD[group == i], by = group]
+    xvalues <- data.frame(Person_ID = factor(),
+                          result_date_months = numeric(),
+                          eGFR = numeric(),
+                          eGFR_hat = numeric())
     
-    for(j in head(unique(groupset$Person_ID), n = 1)){
-            
-            group.plot <- ggplot(data = groupset[Person_ID == j, .(eGFR, result_date_months)]) + 
-            geom_point(aes(x = result_date_months, y = eGFR)) +
-            stat_function(fun = plines, args = list(row = i), aes(x = result_date_months, colour = "red")) +
-                ggtitle(paste("Group ", i, " Person Id - ", j, sep = "")) + xlab("Years")
+    for(j in head(unique(groupset$Person_ID), n = 6)){
+        tempset <- groupset[Person_ID == j, .(Person_ID, result_date_months, eGFR)]
+        tempset <- tempset[, eGFR_hat := sapply(result_date_months, plines, i)]
+        
+        xvalues <- rbindlist(list(xvalues, tempset))
     }
-    group.plot <- group.plot + xlim(0, 3) + ylim(0, 200)
+    group.plot <- ggplot() + 
+        geom_point(data = xvalues, aes(x = result_date_months, y = eGFR, colour = Person_ID)) +
+        geom_line(data = xvalues, aes(x = result_date_months, y = eGFR_hat, colour = Person_ID)) +
+        ggtitle(paste("Group ", i, sep = "")) + xlab("Years") +
+        xlim(0, 3) + ylim(0, 200)
     filename <- paste("Group", i, sep = " ")
     filename <- paste(filename, ".png")
-    print(group.plot)
-    #ggsave(filename = filename, plot = group.plot)
+    #print(group.plot)
+    ggsave(filename = filename, plot = group.plot)
+    
+    group.plot <- group.plot + geom_density()
+    filename <- paste("GroupWithIndividualLines", i, sep = " ")
+    filename <- paste(filename, ".png")
+    ggsave(filename = filename, plot = group.plot)
 }
